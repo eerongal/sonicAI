@@ -1,3 +1,4 @@
+import copy
 import os.path
 import random
 from operator import itemgetter
@@ -74,6 +75,7 @@ def main():
     button_start = Image.open("start-button.png")
 
     last_lives = 3
+
     while True:
         start = default_timer()
         action = nn.predict(obs)
@@ -81,6 +83,11 @@ def main():
         obs, rew, done, info = env.step(action[0])
 
         nn.setScore(observer.calcReward(info['x'], info['rings'], info['score']))
+        end_of_level = info['screen_x_end']
+        level_complete =False
+        if info['x'] >= end_of_level:
+            done = True
+            level_complete = True
 
         d_pad_image_buffer = d_pad_image.copy()
         buttons_image_buffer = button_image.copy()
@@ -122,7 +129,7 @@ def main():
 
 
         if done or observer.stagnant() or info['lives'] < last_lives:
-            genController.loadAncestor(nn.score, nn.get_weights())
+            genController.loadAncestor(nn.score, nn.get_weights(), level_complete)
 
             window["-GENS-"].update("Generation: " + str(genController.getGen()))
             window["-MAX-FITNESS-"].update("Max Fitness: " + str(genController.getMaxFitness()))
@@ -140,8 +147,7 @@ def main():
                 with open(save_file, 'wb') as outp:
                     pickle.dump(genController, outp, pickle.HIGHEST_PROTOCOL)
         last_lives = info['lives']
-        if last_lives == 4:
-            print("last lives 4")
+
 
 
     env.close()
@@ -172,13 +178,15 @@ class generationController():
         mixAncestors = random.randint(1, 10)
 
         #ancestor1 = random.randint(0, len(self.ancestors)-1)
-        ancestor1 = 0
-        ancestor2 = random.randint(1, len(self.ancestors)-1)
+        ancestor1 = random.randint(0, len(self.ancestors)-1)
+
+        ancestor2 = random.randint(0, len(self.ancestors)-1)
         while ancestor2 == ancestor1:
             ancestor2 = random.randint(0, len(self.ancestors) - 1)
 
 
-        returnAncestor = self.ancestors[ancestor1]
+        returnAncestor = copy.deepcopy(self.ancestors[ancestor1])
+        ancestorGen = returnAncestor[2]
         mixingAcnestor = self.ancestors[ancestor2]
         winText = "Parents:\n" + str(returnAncestor[0]) +"\n"
         print("basing ancestor on fitness: " + str(returnAncestor[0]))
@@ -198,7 +206,7 @@ class generationController():
                         mixedWeight = weight
                         if mixAncestors < 6 and random.randint(0, 1) == 1:
                             mixedWeight = mixingAcnestor[1][outerCount][0][innerCount][index]
-                        mutation = random.uniform(-1*self.maxMutation, self.maxMutation)
+                        mutation = random.uniform(-1*self.maxMutation * (self.currentGen - ancestorGen), self.maxMutation * (self.currentGen - ancestorGen))
 
                         inner[index] = mixedWeight + mutation
                         index+=1
@@ -208,14 +216,14 @@ class generationController():
         window["-PARENTS-"].update(winText)
         return returnAncestor
 
-    def loadAncestor(self, score, weights):
+    def loadAncestor(self, score, weights, level_complete):
         self.currentGen += 1
         if score > self.baseScore:
             for ancestor in self.ancestors:
                 if ancestor[0] == score:
                     print("skipping same ancestor")
                     return
-            self.ancestors.append([score, weights])
+            self.ancestors.append([score, weights, self.currentGen-1, level_complete])
             self.ancestors = sorted(self.ancestors, key=itemgetter(0), reverse=True)
             if len(self.ancestors) > self.generationsToKeep :
                 self.ancestors = self.ancestors[:self.generationsToKeep]
@@ -226,7 +234,7 @@ class generationController():
     def getFitnessList(self):
         returnValue = "Top Fitness:\n"
         for entry in self.ancestors:
-            returnValue = returnValue + str(entry[0]) + "\n"
+            returnValue = returnValue + str(entry[0]) + ("★\n" if entry[3] else "\n")
         return returnValue
 
 
@@ -285,7 +293,9 @@ class neuralNetwork():
         return weights
 
     def predict(self, obs):
-        return self.model.predict(np.array(obs).reshape([1, 224, 320, 3]))
+        return self.model.predict(np.array(obs).reshape([1, 65536]))
+        #return self.model.predict(np.array(obs).reshape([1, 224, 320, 3]))
+
 
     def setScore(self, score):
         self.score = score
@@ -338,5 +348,5 @@ if __name__ == "__main__":
         except RuntimeError as e:
             # Memory growth must be set before GPUs have been initialized
             print(e)
-    env = retro.make(game='SonicTheHedgehog2-Genesis')
+    env = retro.make(game='SonicTheHedgehog2-Genesis', obs_type=retro.Observations.RAM)
     main()
